@@ -686,16 +686,22 @@ fn run_app_internal(
                         let term_height = terminal.size()?.height;
                         if let Some(result) = modal.handle_input(key, term_height) {
                             match result {
-                                ModalResult::FileSelected(file_index) => {
-                                    state.reveal_file(file_index);
-                                    state.select_file(file_index);
-                                    if let Some(idx) =
-                                        state.sidebar_visible_index_for_file(state.current_file)
+                                ModalResult::FileSelected(filename) => {
+                                    if let Some(file_index) = state
+                                        .file_diffs
+                                        .iter()
+                                        .position(|diff| diff.filename == filename)
                                     {
-                                        state.sidebar_selected = idx;
-                                        let visible_height =
-                                            terminal.size()?.height.saturating_sub(5) as usize;
-                                        ensure_sidebar_visible(&mut state, visible_height);
+                                        state.reveal_file(file_index);
+                                        state.select_file(file_index);
+                                        if let Some(idx) =
+                                            state.sidebar_visible_index_for_file(state.current_file)
+                                        {
+                                            state.sidebar_selected = idx;
+                                            let visible_height =
+                                                terminal.size()?.height.saturating_sub(5) as usize;
+                                            ensure_sidebar_visible(&mut state, visible_height);
+                                        }
                                     }
                                     active_modal = None;
                                 }
@@ -1364,7 +1370,6 @@ fn run_app_internal(
                                         };
                                         FilePickerItem {
                                             name: diff.filename.clone(),
-                                            file_index: i,
                                             status,
                                             viewed: state.viewed_files.contains(&i),
                                         }

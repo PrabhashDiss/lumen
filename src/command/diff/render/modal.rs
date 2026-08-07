@@ -29,7 +29,6 @@ pub struct KeyBindSection {
 #[derive(Clone)]
 pub struct FilePickerItem {
     pub name: String,
-    pub file_index: usize,
     pub status: FileStatus,
     pub viewed: bool,
 }
@@ -90,7 +89,7 @@ pub enum ModalResult {
     Confirmed,
     #[allow(dead_code)]
     Selected(usize, String),
-    FileSelected(usize),
+    FileSelected(String),
     /// User picked a result in the global search; jump to that file + line
     /// and pin the line to the top of the content area.
     JumpToLine {
@@ -1149,8 +1148,8 @@ impl Modal {
                     None
                 }
                 KeyCode::Enter => {
-                    if let Some(&file_idx) = filtered_indices.get(*selected) {
-                        Some(ModalResult::FileSelected(items[file_idx].file_index))
+                    if let Some(&item_idx) = filtered_indices.get(*selected) {
+                        Some(ModalResult::FileSelected(items[item_idx].name.clone()))
                     } else {
                         Some(ModalResult::Dismissed)
                     }
