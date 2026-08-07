@@ -1,4 +1,8 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+use nucleo_matcher::{
+    pattern::{Atom, AtomKind, CaseMatching, Normalization},
+    Config, Matcher, Utf32Str,
+};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
@@ -1393,33 +1397,30 @@ impl Modal {
         filtered_indices: &mut Vec<usize>,
         selected: &mut usize,
     ) {
-        let query_lower = query.to_lowercase();
-        *filtered_indices = items
+        let pattern = Atom::new(
+            query,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+            false,
+        );
+        let mut matcher = Matcher::new(Config::DEFAULT.match_paths());
+        let mut buf = Vec::new();
+        let mut matches: Vec<_> = items
             .iter()
             .enumerate()
-            .filter(|(_, item)| fuzzy_match(&item.name.to_lowercase(), &query_lower))
-            .map(|(i, _)| i)
+            .filter_map(|(index, item)| {
+                buf.clear();
+                pattern
+                    .score(Utf32Str::new(&item.name, &mut buf), &mut matcher)
+                    .map(|score| (index, score))
+            })
             .collect();
-        if *selected >= filtered_indices.len() {
-            *selected = filtered_indices.len().saturating_sub(1);
-        }
-    }
-}
 
-fn fuzzy_match(text: &str, pattern: &str) -> bool {
-    if pattern.is_empty() {
-        return true;
+        matches.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        *filtered_indices = matches.into_iter().map(|(index, _)| index).collect();
+        *selected = 0;
     }
-    let mut pattern_chars = pattern.chars().peekable();
-    for c in text.chars() {
-        if pattern_chars.peek() == Some(&c) {
-            pattern_chars.next();
-        }
-        if pattern_chars.peek().is_none() {
-            return true;
-        }
-    }
-    pattern_chars.peek().is_none()
 }
 
 /// Build a single row in the global-search results list, telescope-style.
