@@ -1,0 +1,41 @@
+name: Sync with upstream
+
+on:
+  schedule:
+    - cron: "18 3 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-upstream-main
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  UPSTREAM_REPOSITORY: https://github.com/jnsahaj/lumen.git
+
+jobs:
+  sync:
+    name: Rebase main onto upstream/main
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out fork
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Rebase onto upstream
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream "$UPSTREAM_REPOSITORY"
+          git fetch --no-tags origin main
+          git fetch --no-tags upstream main
+
+          git checkout -B main origin/main
+          git rebase upstream/main
+          git push --force-with-lease origin HEAD:main
