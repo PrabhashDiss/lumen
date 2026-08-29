@@ -56,6 +56,22 @@ pub struct CommitInfo {
     pub date: String,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WorkingTreeDiff {
+    Staged,
+    #[default]
+    Unstaged,
+}
+
+impl WorkingTreeDiff {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Staged => "staged changes",
+            Self::Unstaged => "unstaged changes",
+        }
+    }
+}
+
 /// Abstraction over git and jj backends.
 ///
 /// Note: This trait intentionally does not require `Send + Sync` bounds.
@@ -67,9 +83,9 @@ pub trait VcsBackend {
     /// Get commit info for a reference (SHA, HEAD, @, etc.)
     fn get_commit(&self, reference: &str) -> Result<CommitInfo, VcsError>;
 
-    /// Get diff of uncommitted changes (working tree vs HEAD/parent).
-    /// `staged` is only relevant for git; jj ignores it.
-    fn get_working_tree_diff(&self, staged: bool) -> Result<String, VcsError>;
+    /// Get staged or unstaged working-tree changes.
+    /// The distinction is only relevant for VCSs with a staging area.
+    fn get_working_tree_diff(&self, kind: WorkingTreeDiff) -> Result<String, VcsError>;
 
     /// Get diff between two refs (e.g., commit1..commit2).
     fn get_range_diff(&self, from: &str, to: &str, three_dot: bool) -> Result<String, VcsError>;
@@ -79,6 +95,35 @@ pub trait VcsBackend {
 
     /// Get file content at a specific ref.
     fn get_file_content_at_ref(&self, reference: &str, path: &Path) -> Result<String, VcsError>;
+
+    /// Get files changed in the index (staged changes).
+    /// For VCSs without a separate index, this is equivalent to the working copy.
+    fn get_staged_changed_files(&self) -> Result<Vec<String>, VcsError> {
+        self.get_working_tree_changed_files()
+    }
+
+    /// Get files changed in the working tree but not in the index.
+    /// For VCSs without a separate index, this is equivalent to the working copy.
+    fn get_unstaged_changed_files(&self) -> Result<Vec<String>, VcsError> {
+        self.get_working_tree_changed_files()
+    }
+
+    /// Get file content from the index.
+    /// For VCSs without a separate index, this is the working copy.
+    fn get_index_file_content(&self, path: &Path) -> Result<String, VcsError> {
+        self.get_working_tree_file_content(path)
+    }
+
+    /// Get the base content for an unstaged diff.
+    /// For VCSs without a separate index, this is the working-copy parent.
+    fn get_unstaged_base_file_content(&self, path: &Path) -> Result<String, VcsError> {
+        self.get_file_content_at_ref(self.working_copy_parent_ref(), path)
+    }
+
+    /// Get file content from the working copy.
+    fn get_working_tree_file_content(&self, path: &Path) -> Result<String, VcsError> {
+        Ok(std::fs::read_to_string(path)?)
+    }
 
     /// Get current branch name (or bookmark for jj).
     fn get_current_branch(&self) -> Result<Option<String>, VcsError>;

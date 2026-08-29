@@ -77,7 +77,7 @@ Launch an interactive side-by-side diff viewer in your terminal:
 <img width="3456" height="2122" alt="image" src="https://github.com/user-attachments/assets/757e1187-1615-4e90-bee2-5a1f59ec0960" />
 
 ```bash
-# View uncommitted changes
+# View working-tree changes (use S/U in the viewer for staged/unstaged)
 lumen diff
 
 # View changes for a specific commit
@@ -172,6 +172,7 @@ Annotated lines display a `▍` gutter indicator. Use `I` to view, edit, delete,
 
 - `j/k` or arrow keys: Navigate
 - `{/}`: Jump between hunks
+- `S/U`: View staged/unstaged changes
 - `w`: Toggle watch mode
 - `tab`: Toggle sidebar
 - `space`: Mark file as viewed

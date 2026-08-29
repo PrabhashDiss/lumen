@@ -10,7 +10,7 @@ use spinoff::{spinners, Color, Spinner};
 use super::types::{is_binary_content, FileDiff, FileStatus};
 use super::{DiffOptions, PrInfo};
 use crate::commit_reference::CommitReference;
-use crate::vcs::VcsBackend;
+use crate::vcs::{VcsBackend, WorkingTreeDiff};
 
 /// Max concurrent `gh api` requests when fetching PR file contents.
 /// GitHub's documented secondary rate limit caps concurrent requests at 100
@@ -28,8 +28,8 @@ pub fn get_current_branch(backend: &dyn VcsBackend) -> String {
 
 /// Resolved references for diff comparison
 pub enum DiffRefs {
-    /// Uncommitted changes (working tree vs HEAD)
-    WorkingTree,
+    /// Staged or unstaged working-tree changes.
+    WorkingTree(WorkingTreeDiff),
     /// Single commit (SHA vs SHA^)
     Single(String),
     /// Range between two refs
@@ -41,7 +41,7 @@ pub enum DiffRefs {
 impl DiffRefs {
     pub fn from_options(options: &DiffOptions, backend: &dyn VcsBackend) -> Self {
         match &options.reference {
-            None => DiffRefs::WorkingTree,
+            None => DiffRefs::WorkingTree(options.working_tree),
             Some(CommitReference::Single(sha)) => DiffRefs::Single(sha.clone()),
             Some(CommitReference::Range { from, to }) => DiffRefs::Range {
                 from: from.clone(),
@@ -73,11 +73,16 @@ pub fn get_changed_files(options: &DiffOptions, backend: &dyn VcsBackend) -> Vec
     let refs = DiffRefs::from_options(options, backend);
 
     let files: Vec<String> = match refs {
+        DiffRefs::WorkingTree(WorkingTreeDiff::Staged) => {
+            backend.get_staged_changed_files().unwrap_or_default()
+        }
         DiffRefs::Single(sha) => backend.get_changed_files(&sha).unwrap_or_default(),
         DiffRefs::Range { from, to } => backend
             .get_range_changed_files(&from, &to)
             .unwrap_or_default(),
-        DiffRefs::WorkingTree => backend.get_working_tree_changed_files().unwrap_or_default(),
+        DiffRefs::WorkingTree(WorkingTreeDiff::Unstaged) => {
+            backend.get_unstaged_changed_files().unwrap_or_default()
+        }
         DiffRefs::RangeToWorkingTree { from } => {
             // Union of files changed in `from..HEAD` and files changed in the working tree.
             let head_ref = backend.working_copy_parent_ref();
@@ -112,7 +117,14 @@ pub fn get_old_content(filename: &str, refs: &DiffRefs, backend: &dyn VcsBackend
         }
         DiffRefs::Range { from, .. } => from.clone(),
         DiffRefs::RangeToWorkingTree { from } => from.clone(),
-        DiffRefs::WorkingTree => backend.working_copy_parent_ref().to_string(),
+        DiffRefs::WorkingTree(WorkingTreeDiff::Staged) => {
+            backend.working_copy_parent_ref().to_string()
+        }
+        DiffRefs::WorkingTree(WorkingTreeDiff::Unstaged) => {
+            return backend
+                .get_unstaged_base_file_content(Path::new(filename))
+                .unwrap_or_default();
+        }
     };
 
     // Empty ref means root commit with no parent - return empty content
@@ -134,7 +146,13 @@ pub fn get_new_content(filename: &str, refs: &DiffRefs, backend: &dyn VcsBackend
         DiffRefs::Range { to, .. } => backend
             .get_file_content_at_ref(to, Path::new(filename))
             .unwrap_or_default(),
-        DiffRefs::WorkingTree | DiffRefs::RangeToWorkingTree { .. } => {
+        DiffRefs::WorkingTree(WorkingTreeDiff::Staged) => backend
+            .get_index_file_content(Path::new(filename))
+            .unwrap_or_default(),
+        DiffRefs::WorkingTree(WorkingTreeDiff::Unstaged) => backend
+            .get_working_tree_file_content(Path::new(filename))
+            .unwrap_or_default(),
+        DiffRefs::RangeToWorkingTree { .. } => {
             // Read from working tree (actual filesystem)
             fs::read_to_string(filename).unwrap_or_default()
         }
@@ -528,6 +546,7 @@ mod tests {
         let backend = GitBackend::from_cwd().expect("should open repo");
         let options = super::super::DiffOptions {
             reference: None,
+            working_tree: WorkingTreeDiff::Unstaged,
             pr: None,
             detect_pr: false,
             file: None,
@@ -600,6 +619,7 @@ mod tests {
             reference: Some(crate::commit_reference::CommitReference::RangeToWorkingTree {
                 from: "HEAD~1".to_string(),
             }),
+            working_tree: WorkingTreeDiff::Unstaged,
             pr: None,
             detect_pr: false,
             file: None,

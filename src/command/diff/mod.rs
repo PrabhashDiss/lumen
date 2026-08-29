@@ -23,10 +23,12 @@ use std::thread;
 use spinoff::{spinners, Color, Spinner};
 
 use crate::commit_reference::CommitReference;
-use crate::vcs::VcsBackend;
+use crate::vcs::{VcsBackend, WorkingTreeDiff};
 
 pub struct DiffOptions {
     pub reference: Option<CommitReference>,
+    /// Which working-tree changes to show. Toggled by the diff viewer.
+    pub working_tree: WorkingTreeDiff,
     pub pr: Option<String>,
     pub detect_pr: bool,
     pub file: Option<Vec<String>>,

@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use git2::{Commit, DiffFormat, DiffOptions, Repository, StatusOptions, Time, Tree};
+use git2::{Commit, DiffFormat, DiffOptions, Repository, Status, StatusOptions, Time, Tree};
 
-use super::backend::{CommitInfo, StackedCommitInfo, VcsBackend, VcsError};
+use super::backend::{CommitInfo, StackedCommitInfo, VcsBackend, VcsError, WorkingTreeDiff};
 
 /// Format a duration in seconds as relative time (e.g., "2 hours ago").
 fn format_relative_time(secs_ago: i64) -> String {
@@ -270,12 +270,12 @@ impl VcsBackend for GitBackend {
         })
     }
 
-    fn get_working_tree_diff(&self, staged: bool) -> Result<String, VcsError> {
+    fn get_working_tree_diff(&self, kind: WorkingTreeDiff) -> Result<String, VcsError> {
         let mut opts = DiffOptions::new();
         opts.show_binary(true);
         opts.context_lines(3);
 
-        let diff = if staged {
+        let diff = if kind == WorkingTreeDiff::Staged {
             // Staged: diff HEAD tree to index
             let head = self.repo.head().ok().and_then(|h| h.peel_to_tree().ok());
             self.repo
@@ -523,6 +523,26 @@ impl VcsBackend for GitBackend {
         Ok(String::from_utf8_lossy(blob.content()).into_owned())
     }
 
+    fn get_index_file_content(&self, path: &Path) -> Result<String, VcsError> {
+        let index = self
+            .repo
+            .index()
+            .map_err(|e| VcsError::Other(format!("failed to read index: {}", e)))?;
+        let entry = index
+            .get_path(path, 0)
+            .ok_or_else(|| VcsError::FileNotFound(path.display().to_string()))?;
+        let blob = self
+            .repo
+            .find_blob(entry.id)
+            .map_err(|_| VcsError::FileNotFound(path.display().to_string()))?;
+
+        Ok(String::from_utf8_lossy(blob.content()).into_owned())
+    }
+
+    fn get_unstaged_base_file_content(&self, path: &Path) -> Result<String, VcsError> {
+        self.get_index_file_content(path)
+    }
+
     fn get_current_branch(&self) -> Result<Option<String>, VcsError> {
         let head = self
             .repo
@@ -612,6 +632,61 @@ impl VcsBackend for GitBackend {
             .iter()
             .filter_map(|s| s.path().map(String::from))
             .collect();
+
+        Ok(files.into_iter().collect())
+    }
+
+    fn get_staged_changed_files(&self) -> Result<Vec<String>, VcsError> {
+        use std::collections::HashSet;
+
+        let head = self.repo.head().ok().and_then(|h| h.peel_to_tree().ok());
+        let diff = self
+            .repo
+            .diff_tree_to_index(head.as_ref(), None, None)
+            .map_err(|e| VcsError::Other(format!("failed to create staged diff: {}", e)))?;
+
+        let files = diff
+            .deltas()
+            .filter_map(|delta| {
+                let path = delta
+                    .new_file()
+                    .path()
+                    .or_else(|| delta.old_file().path())
+                    .and_then(|path| path.to_str())?;
+                (!should_exclude_path(path)).then(|| path.to_string())
+            })
+            .collect::<HashSet<_>>();
+
+        Ok(files.into_iter().collect())
+    }
+
+    fn get_unstaged_changed_files(&self) -> Result<Vec<String>, VcsError> {
+        use std::collections::HashSet;
+
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(true)
+            .recurse_untracked_dirs(true)
+            .exclude_submodules(true)
+            .include_ignored(false);
+
+        let statuses = self
+            .repo
+            .statuses(Some(&mut opts))
+            .map_err(|e| VcsError::Other(format!("failed to get status: {}", e)))?;
+
+        let worktree_changes = Status::WT_NEW
+            | Status::WT_MODIFIED
+            | Status::WT_DELETED
+            | Status::WT_RENAMED
+            | Status::WT_TYPECHANGE
+            | Status::WT_UNREADABLE;
+        let files = statuses
+            .iter()
+            .filter(|entry| entry.status().intersects(worktree_changes))
+            .filter_map(|entry| entry.path())
+            .filter(|path| !should_exclude_path(path))
+            .map(String::from)
+            .collect::<HashSet<_>>();
 
         Ok(files.into_iter().collect())
     }

@@ -7,7 +7,7 @@ use error::LumenError;
 use git_entity::{commit::Commit, diff::Diff, GitEntity};
 use std::io::Read;
 use std::process;
-use vcs::VcsBackendType;
+use vcs::{VcsBackendType, WorkingTreeDiff};
 
 mod ai_prompt;
 mod command;
@@ -77,7 +77,9 @@ async fn run() -> Result<(), LumenError> {
                         let range_diff = backend
                             .get_range_diff(&from, head_ref, false)
                             .unwrap_or_default();
-                        let wt_diff = backend.get_working_tree_diff(false).unwrap_or_default();
+                        let wt_diff = backend
+                            .get_working_tree_diff(WorkingTreeDiff::Unstaged)
+                            .unwrap_or_default();
                         let combined = format!("{}{}", range_diff, wt_diff);
                         GitEntity::Diff(Diff::from_range_diff(
                             combined,
@@ -87,7 +89,12 @@ async fn run() -> Result<(), LumenError> {
                     }
                     None => {
                         // Default: show uncommitted diff
-                        let diff = backend.get_working_tree_diff(staged)?;
+                        let kind = if staged {
+                            WorkingTreeDiff::Staged
+                        } else {
+                            WorkingTreeDiff::Unstaged
+                        };
+                        let diff = backend.get_working_tree_diff(kind)?;
                         GitEntity::Diff(Diff::from_working_tree_diff(diff, staged)?)
                     }
                 }
@@ -107,7 +114,7 @@ async fn run() -> Result<(), LumenError> {
         }
         Commands::Draft { context } => {
             // Draft always uses staged diff (git convention)
-            let diff = backend.get_working_tree_diff(true)?;
+            let diff = backend.get_working_tree_diff(WorkingTreeDiff::Staged)?;
             let git_entity = GitEntity::Diff(Diff::from_working_tree_diff(diff, true)?);
             command
                 .execute(command::CommandType::Draft {
@@ -138,6 +145,7 @@ async fn run() -> Result<(), LumenError> {
                 reference,
                 pr,
                 detect_pr,
+                working_tree: WorkingTreeDiff::Unstaged,
                 file,
                 watch,
                 theme: theme.or(config.theme.clone()),

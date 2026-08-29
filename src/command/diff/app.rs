@@ -58,7 +58,7 @@ use super::{
 use spinoff::{spinners, Color, Spinner};
 
 use crate::commit_reference::CommitReference;
-use crate::vcs::{StackedCommitInfo, VcsBackend};
+use crate::vcs::{StackedCommitInfo, VcsBackend, WorkingTreeDiff};
 
 /// Navigate to a different commit in stacked mode.
 /// Returns true if navigation was successful.
@@ -293,8 +293,24 @@ fn sync_viewed_files_from_github(pr_info: &PrInfo, state: &mut AppState) {
     }
 }
 
+fn switch_working_tree_view(
+    state: &mut AppState,
+    options: &mut DiffOptions,
+    pr_mode: bool,
+    working_tree: WorkingTreeDiff,
+) {
+    if pr_mode || options.reference.is_some() || options.working_tree == working_tree {
+        return;
+    }
+
+    options.working_tree = working_tree;
+    state.clear_selection();
+    state.set_diff_reference(Some(working_tree.label().to_string()));
+    state.needs_reload = true;
+}
+
 fn run_app_internal(
-    options: DiffOptions,
+    mut options: DiffOptions,
     pr_info: Option<PrInfo>,
     file_diffs: Vec<super::types::FileDiff>,
     stacked_commits: Option<Vec<StackedCommitInfo>>,
@@ -314,6 +330,8 @@ fn run_app_internal(
             "PR #{} ({}...{})",
             pr.number, pr.base_ref, pr.head_ref
         ))
+    } else if options.reference.is_none() {
+        Some(options.working_tree.label().to_string())
     } else {
         options.reference.as_ref().map(|r| match r {
             CommitReference::Single(s) => s.clone(),
@@ -1868,6 +1886,23 @@ fn run_app_internal(
                                 ));
                             }
                         }
+                        // Uppercase avoids conflicting with `s`, which sends annotations.
+                        KeyCode::Char('S') => {
+                            switch_working_tree_view(
+                                &mut state,
+                                &mut options,
+                                pr_info.is_some(),
+                                WorkingTreeDiff::Staged,
+                            );
+                        }
+                        KeyCode::Char('U') => {
+                            switch_working_tree_view(
+                                &mut state,
+                                &mut options,
+                                pr_info.is_some(),
+                                WorkingTreeDiff::Unstaged,
+                            );
+                        }
                         KeyCode::Char('r') => {
                             state.needs_reload = true;
                         }
@@ -2059,6 +2094,10 @@ fn run_app_internal(
                                             KeyBind {
                                                 key: "r",
                                                 description: "Refresh diff / PR",
+                                            },
+                                            KeyBind {
+                                                key: "S / U",
+                                                description: "Show staged / unstaged changes",
                                             },
                                             KeyBind {
                                                 key: "y",

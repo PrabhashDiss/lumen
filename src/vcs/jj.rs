@@ -32,7 +32,7 @@ use jj_lib::tree_merge::MergeOptions;
 use jj_lib::workspace::{default_working_copy_factories, Workspace};
 use pollster::FutureExt;
 
-use super::backend::{CommitInfo, StackedCommitInfo, VcsBackend, VcsError};
+use super::backend::{CommitInfo, StackedCommitInfo, VcsBackend, VcsError, WorkingTreeDiff};
 
 /// Files to exclude from diff output (same as GIT_DIFF_EXCLUSIONS in git_entity).
 const DIFF_EXCLUDED_FILES: &[&str] = &[
@@ -588,7 +588,7 @@ impl VcsBackend for JjBackend {
         })
     }
 
-    fn get_working_tree_diff(&self, _staged: bool) -> Result<String, VcsError> {
+    fn get_working_tree_diff(&self, _kind: WorkingTreeDiff) -> Result<String, VcsError> {
         // For jj, working tree changes are part of @ commit
         // Get diff of @ vs @-
         let wc_commit = self.resolve_single_commit("@")?;
@@ -1224,7 +1224,7 @@ mod tests {
 
         // Reload backend to get updated state
         let backend = JjBackend::new(&repo.dir).expect("should load backend");
-        let diff = backend.get_working_tree_diff(false);
+        let diff = backend.get_working_tree_diff(WorkingTreeDiff::Unstaged);
 
         assert!(
             diff.is_ok(),
@@ -1239,8 +1239,8 @@ mod tests {
             diff
         );
 
-        // staged param is ignored (jj has no staging) - same result for true/false
-        let diff_staged = backend.get_working_tree_diff(true);
+        // The selection is ignored because jj has no staging area.
+        let diff_staged = backend.get_working_tree_diff(WorkingTreeDiff::Staged);
         assert!(
             diff_staged.is_ok(),
             "staged param should be ignored (jj has no staging)"
